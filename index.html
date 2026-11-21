@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voklo — Live Anonymous Chat Rooms</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #7c3aed;
+      --accent-hover: #6d28d9;
+      --cyan: #06b6d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Header */
+    header {
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .brand { font-size: 1.25rem; font-weight: 800; color: var(--cyan); letter-spacing: 0.5px; }
+    .user-badge { font-size: 0.85rem; background: #334155; padding: 5px 10px; border-radius: 20px; }
+
+    /* Main Layout */
+    .app { display: flex; flex: 1; overflow: hidden; }
+    .sidebar {
+      width: 240px; background: var(--panel); border-right: 1px solid var(--border);
+      padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+    }
+    .sidebar h3 { font-size: 0.75rem; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+    .room-btn {
+      text-align: left; background: transparent; border: 1px solid transparent; color: var(--text);
+      padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: 0.15s;
+    }
+    .room-btn:hover { background: #334155; }
+    .room-btn.active { background: var(--accent); font-weight: 600; }
+    .room-desc { font-size: 0.72rem; color: #cbd5e1; display: block; margin-top: 2px; }
+
+    /* Chat Area */
+    .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .room-bar {
+      padding: 10px 16px; background: #162032; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .room-bar h2 { font-size: 1rem; }
+    .mobile-rooms-btn {
+      display: none; background: #334155; color: var(--text); border: none;
+      padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;
+    }
+    .messages {
+      flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+    }
+    .msg {
+      background: var(--panel); padding: 10px 12px; border-radius: 10px; max-width: 85%;
+      border: 1px solid var(--border); word-wrap: break-word;
+    }
+    .msg.mine { align-self: flex-end; background: #2e1065; border-color: var(--accent); }
+    .msg-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+    .msg-user { font-weight: 700; font-size: 0.85rem; color: var(--cyan); }
+    .msg.mine .msg-user { color: #c4b5fd; }
+    .msg-time { font-size: 0.7rem; color: var(--muted); }
+    .msg-text { font-size: 0.92rem; line-height: 1.4; }
+
+    /* Input Bar */
+    .input-bar {
+      padding: 12px; background: var(--panel); border-top: 1px solid var(--border);
+      display: flex; gap: 8px;
+    }
+    .input-bar input {
+      flex: 1; padding: 11px 14px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font-size: 0.95rem; outline: none;
+    }
+    .input-bar input:focus { border-color: var(--accent); }
+    .input-bar button {
+      background: var(--accent); color: white; border: none; padding: 0 18px;
+      border-radius: 8px; font-weight: 600; cursor: pointer;
+    }
+    .input-bar button:hover { background: var(--accent-hover); }
+
+    /* Login Modal */
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(15, 23, 42, 0.92);
+      display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50;
+    }
+    .modal {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+      padding: 24px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal h1 { font-size: 1.4rem; color: var(--cyan); }
+    .modal p { font-size: 0.85rem; color: var(--muted); line-height: 1.4; }
+    .modal input[type="text"] {
+      padding: 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font-size: 1rem;
+    }
+    .check-row { display: flex; gap: 8px; align-items: flex-start; font-size: 0.8rem; color: #cbd5e1; }
+    .modal button {
+      background: var(--accent); color: white; border: none; padding: 12px;
+      border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer;
+    }
+
+    /* Mobile Responsive */
+    @media (max-width: 700px) {
+      .sidebar { position: fixed; left: -260px; top: 53px; bottom: 0; z-index: 20; transition: 0.2s; }
+      .sidebar.open { left: 0; }
+      .mobile-rooms-btn { display: inline-block; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 18+ Guest Login Modal -->
+  <div class="modal-bg" id="loginModal">
+    <div class="modal">
+      <h1>Welcome to Voklo</h1>
+      <p>Your voice. Your room. Live. Pick a nickname to jump into public chat rooms instantly.</p>
+      <input type="text" id="nickInput" placeholder="Enter nickname (e.g. Kabir99)" maxlength="20" />
+      <label class="check-row">
+        <input type="checkbox" id="ageCheck" />
+        <span>I confirm I am 18+ years old and agree to follow respectful community guidelines.</span>
+      </label>
+      <button onclick="joinChat()">Start Chatting</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">VOKLO</div>
+    <div class="user-badge" id="userBadge">Guest</div>
+  </header>
+
+  <!-- Main App -->
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <h3>Public Rooms</h3>
+      <div id="roomList">Loading rooms...</div>
+    </aside>
+
+    <main class="chat-area">
+      <div class="room-bar">
+        <button class="mobile-rooms-btn" onclick="toggleSidebar()">☰ Rooms</button>
+        <h2 id="currentRoomTitle">General Lounge</h2>
+        <span style="font-size: 0.78rem; color: #22c55e;">● Live</span>
+      </div>
+
+      <div class="messages" id="messagesBox"></div>
+
+      <form class="input-bar" onsubmit="sendMessage(event)">
+        <input type="text" id="msgInput" placeholder="Type a message..." maxlength="500" autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </main>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://tiuyhsabtguiwktcsoaw.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_mB9ygtWSe6dCo9GrR7kQlQ_6EpY_YoA";
+
+    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let nickname = localStorage.getItem("voklo_nick") || "";
+    let currentRoom = "general";
+    let realtimeSub = null;
+    let lastSentTime = 0;
+
+    // Basic bad-word filter
+    const bannedWords = ["spamlink", "abuse1", "abuse2"];
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, m => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[m]));
+    }
+
+    function toggleSidebar() {
+      document.getElementById("sidebar").classList.toggle("open");
+    }
+
+    function joinChat() {
+      const nick = document.getElementById("nickInput").value.trim();
+      const is18 = document.getElementById("ageCheck").checked;
+      if (nick.length < 2) return alert("Please enter a nickname (at least 2 characters).");
+      if (!is18) return alert("You must confirm you are 18+ to enter.");
+
+      nickname = nick;
+      localStorage.setItem("voklo_nick", nickname);
+      document.getElementById("userBadge").textContent = "👤 " + nickname;
+      document.getElementById("loginModal").style.display = "none";
+      initApp();
+    }
+
+    async function initApp() {
+      await loadRooms();
+      await switchRoom("general", "General Lounge");
+    }
+
+    async function loadRooms() {
+      const { data, error } = await db.from("rooms").select("*").order("created_at");
+      if (error) return console.error(error);
+
+      const list = document.getElementById("roomList");
+      list.innerHTML = "";
+      data.forEach(room => {
+        const btn = document.createElement("button");
+        btn.className = "room-btn" + (room.id === currentRoom ? " active" : "");
+        btn.id = "room-" + room.id;
+        btn.innerHTML = `${escapeHtml(room.name)}<span class="room-desc">${escapeHtml(room.description || "")}</span>`;
+        btn.onclick = () => {
+          switchRoom(room.id, room.name);
+          document.getElementById("sidebar").classList.remove("open");
+        };
+        list.appendChild(btn);
+      });
+    }
+
+    async function switchRoom(roomId, roomName) {
+      currentRoom = roomId;
+      document.getElementById("currentRoomTitle").textContent = roomName;
+      document.querySelectorAll(".room-btn").forEach(b => b.classList.remove("active"));
+      const activeBtn = document.getElementById("room-" + roomId);
+      if (activeBtn) activeBtn.classList.add("active");
+
+      const box = document.getElementById("messagesBox");
+      box.innerHTML = "<p style='color:#94a3b8;font-size:0.85rem;'>Loading messages...</p>";
+
+      const { data, error } = await db
+        .from("messages")
+        .select("*")
+        .eq("room_id", roomId)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      box.innerHTML = "";
+      if (!error && data) {
+        data.reverse().forEach(renderMessage);
+        box.scrollTop = box.scrollHeight;
+      }
+
+      if (realtimeSub) db.removeChannel(realtimeSub);
+      realtimeSub = db
+        .channel("room-" + roomId)
+        .on("postgres_changes", {
+          event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}`
+        }, payload => {
+          renderMessage(payload.new);
+          box.scrollTop = box.scrollHeight;
+        })
+        .subscribe();
+    }
+
+    function renderMessage(msg) {
+      const box = document.getElementById("messagesBox");
+      const div = document.createElement("div");
+      div.className = "msg" + (msg.nickname === nickname ? " mine" : "");
+      const time = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      div.innerHTML = `
+        <div class="msg-head">
+          <span class="msg-user">${escapeHtml(msg.nickname)}</span>
+          <span class="msg-time">${time}</span>
+        </div>
+        <div class="msg-text">${escapeHtml(msg.content)}</div>
+      `;
+      box.appendChild(div);
+    }
+
+    async function sendMessage(e) {
+      e.preventDefault();
+      const input = document.getElementById("msgInput");
+      let text = input.value.trim();
+      if (!text) return;
+
+      const now = Date.now();
+      if (now - lastSentTime < 1500) {
+        return alert("Slow down! Please wait a second before sending another message.");
+      }
+
+      const lower = text.toLowerCase();
+      if (bannedWords.some(w => lower.includes(w))) {
+        return alert("Message blocked by community filter.");
+      }
+
+      lastSentTime = now;
+      input.value = "";
+
+      const { error } = await db.from("messages").insert({
+        room_id: currentRoom,
+        nickname: nickname,
+        content: text
+      });
+      if (error) console.error("Send error:", error);
+    }
+
+    if (nickname) {
+      document.getElementById("nickInput").value = nickname;
+    }
+  </script>
+</body>
+</html>
